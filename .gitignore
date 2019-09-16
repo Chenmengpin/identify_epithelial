@@ -1,0 +1,8 @@
+logs/
+**/logs/
+*._*
+REMOVEME/
+tutorials/
+.DS_Store
+.Rhistory
+drafts/

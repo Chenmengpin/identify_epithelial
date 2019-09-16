@@ -1,0 +1,233 @@
+---
+title: Seurat v3 Analysis Output File
+author: written by Sunny Wu (Cancer Tumour Progression Group)
+date: script last updated 24022019
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## SUMMARY 
+
+This is a summary file for the analysis of the `r temp_species_type` sample `r temp_project_name` using Seurat v3. A total number of `r temp_cell_number` cells were processed after QC, with a total number of `r format(temp_total_genes,scientific=FALSE)` genes detected.
+
+Analysis started on `r temp_start_time` and finished on `r temp_finish_time`
+
+## CELLRANGER OUTPUT METRICS
+
+```{r ,echo = FALSE, fig.cap="Cellranger V2 Output Metrics"}
+if(!file.exists("Analysis_params_and_Rmd/01_cellranger_stats.csv")) {
+  
+temp_csv <- read.csv("Analysis_params_and_Rmd/01_cellranger_stats.csv",
+                     row.names = "X")
+knitr::kable(temp_csv, table.attr = "style='width:50%;'")
+} else print("No Cellranger Output Stats Available")
+
+```
+
+## SEURAT FILTERING METRICS
+
+Barcode Rank Plot  
+```{r pressure, echo=FALSE, out.width = '75%'}
+knitr::include_graphics("Figures/Metrics/01_barcode_rank_plot.png")
+```
+
+Filtered Summary Statistics
+```{r ,echo = FALSE, fig.cap="Metrics from seurat filtered dataset"}
+
+temp_csv <- read.csv("Gene_expression_and_stats/02_EMPTYDROPS_FILTERED_METRICS.csv",
+                     row.names = "X")
+colnames(temp_csv) <- c("Genes per cell", "UMIs per cell", 
+                        "Mitochondrial %", "Filtered Cells")
+options(digits = 4)
+knitr::kable(temp_csv)
+
+```
+
+GENES UMIs MITO% 
+```{r , echo=FALSE, out.width = '100%'}
+knitr::include_graphics("Figures/Metrics/02_FILTERED_VlnPlot_nGene_nUMI_percent_mito.png")
+```
+GENES vs UMIs
+```{r , echo=FALSE, out.width = '100%'}
+knitr::include_graphics("Figures/Metrics/03_FILTERED_GenePlot_nGene_nUMI.png")
+```
+GENES vs MITO%
+```{r , echo=FALSE, out.width = '100%'}
+knitr::include_graphics("Figures/Metrics/04_FILTERED_GenePlot_nUMI_percent_mito.png")
+```
+UMIs vs MITO%
+```{r , echo=FALSE, out.width = '100%'}
+knitr::include_graphics("Figures/Metrics/05_FILTERED_GenePlot_nGene_percent_mito.png")
+```
+
+## DIMENSIONAL REDUCTION PLOTS
+
+Clustering and dimensional reduction was performed using a total of `r temp_PC_A_length`, `r temp_PC_B_length` and `r temp_PC_C_length` principal components with clustering performed at resolutions `r temp_res_1`, `r temp_res_2` and `r temp_res_3` for each set of PCs.
+
+```{r , echo=FALSE, fig.cap=paste0("UMAP plot of clustering at resolution ",temp_res_1), out.width = '75%'}
+knitr::include_graphics(paste0("Figures/UMAP/UMAP_PC_A_res",temp_res_1,".png"))
+```
+
+[Clustering at res `r temp_res_2`](Figures/UMAP/UMAP_PC_A_res`r temp_res_2`.png){width=600px}  
+[Clustering at res `r temp_res_3`](Figures/UMAP/UMAP_PC_A_res`r temp_res_3`.png){width=600px}
+
+## GENE MARKERS
+
+Gene markers overlayed on to UMAP plots generated from `r temp_PC_A_length` PCs. Input markers labelled `r temp_markers_set_name_1`, `r temp_markers_set_name_2` and `r temp_markers_set_name_3`.  
+
+`r temp_markers_set_name_1`
+```{r , echo=FALSE, out.width = '100%'}
+knitr::include_graphics(paste0("Figures/Gene_markers/UMAP/FeaturePlot_01_",temp_markers_set_name_1,"_markers_A.png"))
+```
+
+`r temp_markers_set_name_2`
+```{r , echo=FALSE, out.width = '100%'}
+knitr::include_graphics(paste0("Figures/Gene_markers/UMAP/FeaturePlot_02_",temp_markers_set_name_2,"_markers_A.png"))
+```
+
+`r temp_markers_set_name_3`
+```{r , echo=FALSE, out.width = '100%'}
+knitr::include_graphics(paste0("Figures/Gene_markers/UMAP/FeaturePlot_03_",temp_markers_set_name_3,"_markers_A.png"))
+```
+
+## HEATMAP
+
+Heatmap of the top 10 genes from the clustering using `r temp_PC_A_length` PCs at resolution `r temp_res_1`. Heatmaps from other PC sets and clustering resolutions can be found in the Output/Figures/Heatmaps/ directory.    
+
+```{r , echo=FALSE, fig.cap="Heatmap of the Top 10 DEGs per cluster", out.width = '100%'}
+if(temp_do_differential_expression) {
+
+knitr::include_graphics(paste0("Figures/Heatmaps/DoHeatMap_PC_A_res.",temp_res_1,".png"))
+} else print("Differential gene expression was not performed")
+
+```
+
+## CELL TYPE ANNOTATION
+
+Cell type identification using Garnett with a user defined classifier.  
+
+UMAP of annotated clusters  
+```{r , echo=FALSE, out.width = '100%'}
+if(temp_do_differential_expression) {
+
+knitr::include_graphics("Figures/Cell_type_ID_Garnett/UMAP_PC_A_celltype_garnett.png")
+} else print("Garnett cell type annotation was not performed")
+
+```
+
+Percentage of Annotated Cell Types  
+```{r , echo=FALSE, out.width = '100%'}
+if(temp_run_garnett) {
+knitr::include_graphics("Figures/Cell_type_ID_Garnett/01_Celltype_garnett_proportions.png")
+  }
+```
+
+```{r ,echo = FALSE}
+if(temp_run_garnett) {
+
+temp_csv <- read.csv("Gene_expression_and_stats/03_celltype_garnett_proportions.csv")
+colnames(temp_csv) <- c("Cell Type", "Number of Cells", 
+                        "Percentage of Total")
+options(digits = 4)
+knitr::kable(temp_csv)
+}
+
+```
+
+Markers used for classification  
+
+Epithelial Markers  
+```{r , echo=FALSE, out.width = '100%'}
+if(temp_run_garnett) {
+knitr::include_graphics(paste0("Figures/Cell_type_ID_Garnett/VlnPlot_classifier_genes_1_Epithelial.png"))
+}
+```
+
+Luminal Epithelial Markers  
+```{r , echo=FALSE, out.width = '100%'}
+if(temp_run_garnett) {
+knitr::include_graphics(paste0("Figures/Cell_type_ID_Garnett/VlnPlot_classifier_genes_2_Mature_epithelial.png"))
+}
+```
+
+Myoepithelial Markers  
+```{r , echo=FALSE, out.width = '100%'}
+if(temp_run_garnett) {
+  knitr::include_graphics(paste0("Figures/Cell_type_ID_Garnett/VlnPlot_classifier_genes_3_Myoepithelial.png"))
+}
+```
+
+Endothelial Markers  
+```{r , echo=FALSE, out.width = '100%'}
+if(temp_run_garnett) {
+  knitr::include_graphics(paste0("Figures/Cell_type_ID_Garnett/VlnPlot_classifier_genes_4_Endothelial.png"))
+}
+```
+
+T Cell Markers  
+```{r , echo=FALSE, out.width = '100%'}
+if(temp_run_garnett) {
+  knitr::include_graphics(paste0("Figures/Cell_type_ID_Garnett/VlnPlot_classifier_genes_5_T_cell.png"))
+}
+```
+
+T-Reg Markers  
+```{r , echo=FALSE, out.width = '100%'}
+if(temp_run_garnett) {
+  knitr::include_graphics(paste0("Figures/Cell_type_ID_Garnett/VlnPlot_classifier_genes_6_T_Reg.png"))
+}
+```
+
+Myeloid Markers  
+```{r , echo=FALSE, out.width = '100%'}
+if(temp_run_garnett) {
+  knitr::include_graphics(paste0("Figures/Cell_type_ID_Garnett/VlnPlot_classifier_genes_7_Myeloid.png"))
+}
+```
+
+B-Cell Markers  
+```{r , echo=FALSE, out.width = '100%'}
+if(temp_run_garnett) {
+  knitr::include_graphics(paste0("Figures/Cell_type_ID_Garnett/VlnPlot_classifier_genes_8_B_cell.png"))
+}
+```
+
+CAF1 Markers  
+```{r , echo=FALSE, out.width = '100%'}
+if(temp_run_garnett) {
+  knitr::include_graphics(paste0("Figures/Cell_type_ID_Garnett/VlnPlot_classifier_genes_9_CAF1.png"))
+}
+```
+
+CAF2 Markers  
+```{r , echo=FALSE, out.width = '100%'}
+if(temp_run_garnett) {
+  knitr::include_graphics(paste0("Figures/Cell_type_ID_Garnett/VlnPlot_classifier_genes_10_CAF2.png"))
+}
+```
+
+Proliferation Markers  
+```{r , echo=FALSE, out.width = '100%'}
+if(temp_run_garnett) {
+  knitr::include_graphics(paste0("Figures/Cell_type_ID_Garnett/VlnPlot_classifier_genes_11_Proliferation.png"))
+}
+```
+
+## SEURAT V3 ANALYSIS PARAMETER FILE
+![](Analysis_params_and_Rmd/02_analysis_params.txt){width=1200px}
+
+## OUTPUT DIRECTORY
+
+In the output directory from this analysis, you can find the following structure.
+
+![](Analysis_params_and_Rmd/03_output_directory_structure.txt){width=1200px}
+
+## R SESSION INFO
+
+![](Analysis_params_and_Rmd/04_Rsessioninfo.txt){width=1200px}
