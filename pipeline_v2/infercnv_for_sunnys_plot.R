@@ -288,8 +288,8 @@ for (i in 1:length(sample_names)) {
 }
 
 # convert pdf to png:
-  system(paste0("for p in ", out_dir, "*.pdf; do echo $p; f=$(basename $p); echo $f; ",
-    "new=$(echo $f | sed 's/.pdf/.png/'); echo $new; ", 
-    "convert -density 150 ", out_dir, "$f -quality 90 ", out_dir, "$new; done"))
-  
-  print(paste0("Heatmaps created, output in ", out_dir))
+system(paste0("for p in ", out_dir, "*.pdf; do echo $p; f=$(basename $p); echo $f; ",
+  "new=$(echo $f | sed 's/.pdf/.png/'); echo $new; ", 
+  "convert -density 150 ", out_dir, "$f -quality 90 ", out_dir, "$new; done"))
+
+print(paste0("Heatmaps created, output in ", out_dir))
