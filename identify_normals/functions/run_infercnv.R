@@ -6,7 +6,7 @@ run_infercnv <- function(infercnv_object, ncores, outdir, cutoff, window,
     cutoff=cutoff,
     window_length=window,
     max_centered_threshold=threshold,
-    cluster_by_groups=T,
+    cluster_by_groups=F,
     plot_steps=F,
     denoise=T,
     sd_amplifier=denoise_value

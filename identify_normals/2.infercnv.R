@@ -86,9 +86,6 @@ create_QC_annotation <- dget(paste0(func_dir, "create_QC_annotation.R"))
 ### 1. Generate input matrix and metadata files ###
 ################################################################################
 
-# load seurat object:
-seurat_10X <- readRDS(paste0(sample_dir, "Rdata/03_seurat_object_processed.RData"))
-
 # set up subset output directory if necessary:
 if (subset_data) {
   out_dir <- paste0(out_dir, "subset")
@@ -96,193 +93,144 @@ if (subset_data) {
   system(paste0("mkdir -p ", input_dir))
 }
 
-# create raw matrix input file and subset if necessary:
-count_df <- as.matrix(GetAssayData(seurat_10X , slot = "counts"))
-if (subset_data) {
-  count_df <- count_df[1:500, 1:500]
-}
+if (!file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt") {
 
-# prepare infercnv metadata with annotated cell types and update seurat object:
-print("Creating inferCNV metadata file...")
-infercnv_metadata <- prepare_infercnv_metadata(seurat_10X, subset_data=subset_data, 
-  count_df)
-seurat_10X <- infercnv_metadata$seurat
-print(paste0("Cell types are: ", unique(infercnv_metadata$metadata$cell_type)))
-
-# only keep cells in metadata df:
-print(paste0("No cells in count df before filtering for those in metadata df = ", 
-    ncol(count_df)))
-count_df <- count_df[,colnames(count_df) %in% infercnv_metadata$metadata$cell_ids]
-print(paste0("No cells in count df after filtering for those in metadata df = ", 
-    ncol(count_df)))
-
-# create raw matrix input file
-if (!file.exists(paste0(input_dir, "input_matrix.txt"))) {
-  print("Creating inferCNV raw counts file...")
-  write.table(count_df, paste0(input_dir, "input_matrix.txt"), quote=F,
-  sep="\t", col.names=T, row.names=T)
-}
-
-# generate cluster metric plots for epithelial clusters:
-epithelial_clusters <- grep("pithelial", unique(infercnv_metadata$metadata$cell_type), value=T)
-print(paste0("Epithelial cluster = ", epithelial_clusters))
-if (!file.exists(paste0(plot_dir, "metrics_by_epithelial_cluster.png"))) {
-  temp_png_function(paste0(plot_dir, "metrics_by_epithelial_cluster.png"))
-    temp_violinplot <- VlnPlot(
-      object = seurat_10X,
-      features = c("nFeature_RNA", "nCount_RNA", "percent.mito"),
-      pt.size = 1.5,
-      idents = epithelial_clusters
-    )
-    print(temp_violinplot)
-  dev.off()
-}
-
-# check all epithelial cells from integrated data are present:
-individual_epi_ids <- names(Idents(seurat_10X))[grep("pithelial", Idents(seurat_10X))]
-
-if (!file.exists(paste0(input_dir, "integrated_object_epithelial_cell_ids.txt"))) {
-  integrated_object <- readRDS(paste0(integrated_dir, 
-    "/01_seurat_subset_Epithelial.Rdata"))
-  integrated_epi_ids <- names(Idents(integrated_object))[grep(sample_name, 
-    names(Idents(integrated_object)))]
-  write.table(integrated_epi_ids, paste0(input_dir, 
-    "integrated_object_epithelial_cell_ids.txt"), quote=F, sep="\n", col.names=F,
-    row.names=F)
-} else {
-  integrated_epi_ids <- read.table(paste0(input_dir, "integrated_object_epithelial_cell_ids.txt"),
-    header=F, sep="\n", as.is=T)[,1]
-}
-
-missing_epis <- integrated_epi_ids[!(integrated_epi_ids %in% individual_epi_ids)]
-print(paste0("Total no. epithelial cells in integrated data but not individual = ",
-  length(missing_epis)))
-
-# if no epithelial or CAF clusters present, abort:
-if (length(epithelial_clusters) < 1) {
-  print(paste0("No epithelial/myoepithelial clusters detected, aborting..."))
-} else {
-  # write metadata files and new seurat object:
-  if (!file.exists(paste0(input_dir, "metadata.txt"))) {
-    write.table(infercnv_metadata$metadata, paste0(input_dir, "metadata.txt"), 
-      quote=F, sep="\t", col.names=F, row.names=F)
-    write.table(infercnv_metadata$number_per_group, paste0(input_dir, 
-      "number_per_group.txt"), quote=F, col.names=F, row.names=F, sep="\t")
-    saveRDS(seurat_10X, paste0(sample_dir, "Rdata/04_seurat_object_annotated.RData"))
+  # load seurat object:
+  seurat_10X <- readRDS(paste0(sample_dir, "Rdata/03_seurat_object_processed.RData"))
+  
+  # create raw matrix input file and subset if necessary:
+  count_df <- as.matrix(GetAssayData(seurat_10X , slot = "counts"))
+  if (subset_data) {
+    count_df <- count_df[1:500, 1:500]
   }
   
-  # define normals which will act as InferCNV reference cells:
-  normals <- grep(
-  	"[e,E]pithelial|[m,M]yoepithelial|CAF|[u,U]nassigned|[u,U]nknown|[t,T]umour|[t,T]umor", 
-    unique(infercnv_metadata$metadata$cell_type[
-      infercnv_metadata$metadata$cell_ids %in% colnames(count_df)
-    ]), value=T, 
-    invert=T
-  )
+  # prepare infercnv metadata with annotated cell types and update seurat object:
+  print("Creating inferCNV metadata file...")
+  infercnv_metadata <- prepare_infercnv_metadata(seurat_10X, subset_data=subset_data, 
+    count_df)
+  seurat_10X <- infercnv_metadata$seurat
+  print(paste0("Cell types are: ", unique(infercnv_metadata$metadata$cell_type)))
   
-  print(paste0("Normal is: ", normals))
-
-  if (length(list.files(out_dir, pattern = "infercnv.12_denoised.observations.txt", 
-  	full.names = T)) == 0) {
-        print("Creating inferCNV object...")
-        raw_path <- paste0(input_dir, "input_matrix.txt")
-        annotation_path <- paste0(input_dir, "metadata.txt")
-        gene_path <- paste0(ref_dir, "infercnv_gene_order.txt")
-        initial_infercnv_object <- create_infercnv_object(raw_path, annotation_path,
-          gene_path, normals)
-        
-        print("InferCNV object created, running inferCNV...")
-        infercnv_output <- run_infercnv(initial_infercnv_object, numcores-1, out_dir, 
-          0.1, 101, 3, 1.3)
-        }
-      }
-    }
+  # only keep cells in metadata df:
+  print(paste0("No cells in count df before filtering for those in metadata df = ", 
+      ncol(count_df)))
+  count_df <- count_df[,colnames(count_df) %in% infercnv_metadata$metadata$cell_ids]
+  print(paste0("No cells in count df after filtering for those in metadata df = ", 
+      ncol(count_df)))
+  
+  # create raw matrix input file
+  if (!file.exists(paste0(input_dir, "input_matrix.txt"))) {
+    print("Creating inferCNV raw counts file...")
+    write.table(count_df, paste0(input_dir, "input_matrix.txt"), quote=F,
+    sep="\t", col.names=T, row.names=T)
   }
   
+  # generate cluster metric plots for epithelial cluster:
+  epithelial_clusters <- grep("pithelial", unique(infercnv_metadata$metadata$cell_type), value=T)
+  print(paste0("Epithelial cluster = ", epithelial_clusters))
+  if (!file.exists(paste0(plot_dir, "metrics_by_epithelial_cluster.png"))) {
+    temp_png_function(paste0(plot_dir, "metrics_by_epithelial_cluster.png"))
+      temp_violinplot <- VlnPlot(
+        object = seurat_10X,
+        features = c("nFeature_RNA", "nCount_RNA", "percent.mito"),
+        pt.size = 1.5,
+        idents = epithelial_clusters
+      )
+      print(temp_violinplot)
+    dev.off()
+  }
   
-  ################################################################################
-  ### 4. Create heatmap and annotations ###
-  ################################################################################
+  # remove cluster information for epithelial cells:
+  infercnv_metadata$metadata$cell_type[grep("pithelial", infercnv_metadata$metadata$cell_type)] <- 
+  gsub("_[0-9].*$", "", 
+    infercnv_metadata$metadata$cell_type[grep("pithelial", infercnv_metadata$metadata$cell_type)])
   
+  # check all epithelial cells from integrated data are present:
+  individual_epi_ids <- names(Idents(seurat_10X))[grep("pithelial", Idents(seurat_10X))]
   
-  
-  if (split_dataset) {
-    if (HMM) {
-      if (run_mode == "subpop") {
-        output_files <- list.files(paste0(seurat_path, "seurat_", 
-          sample_name, 
-          "/Output/InferCNV/supervised_clustering/subpop"),
-          pattern = "infercnv.14_HMM_predHMMi6.rand_trees.hmm_mode-subclusters.repr_intensities.observations.txt",
-          recursive=T, full.names=T)
-        # remove infercnv done on whole sample if exists:
-        output_files <- as.list(output_files[
-          grep("[0-9]/infercnv|Aggregate_group/infercnv", output_files)
-        ])
-        # load dataframes:
-        output_dfs <- lapply(output_files, function(x) as.data.frame(t(read.table(x))))
-        # remove columns missing from one or more dfs:
-        for (d in 1:length(output_dfs)) {
-          if (d==1) {
-            keep_colnames <- colnames(output_dfs[[d]])
-          } else {
-            missing_cols <- c(
-              keep_colnames[!(keep_colnames %in% colnames(output_dfs[[d]]))],
-              colnames(output_dfs[[d]])[
-                !(colnames(output_dfs[[d]]) %in% keep_colnames)
-              ]
-            )
-            keep_colnames <- keep_colnames[!(keep_colnames %in% missing_cols)]
-          }
-        }
-        infercnv_output <- lapply(output_dfs, function(x) subset(x, select=keep_colnames))
-        # join dataframes and remove duplicates
-        infercnv_output <- do.call("rbind", output_dfs)
-        infercnv_output <- infercnv_output[!duplicated(rownames(infercnv_output))]
-      }
-    }
+  if (!file.exists(paste0(input_dir, "integrated_object_epithelial_cell_ids.txt"))) {
+    integrated_object <- readRDS(paste0(integrated_dir, 
+      "/01_seurat_subset_Epithelial.Rdata"))
+    integrated_epi_ids <- names(Idents(integrated_object))[grep(sample_name, 
+      names(Idents(integrated_object)))]
+    write.table(integrated_epi_ids, paste0(input_dir, 
+      "integrated_object_epithelial_cell_ids.txt"), quote=F, sep="\n", col.names=F,
+      row.names=F)
   } else {
-    if (HMM) {
-      if (run_mode == "subpop") {
-        if (subset_data) {
-          infercnv_output_filename <- list.files(paste0(seurat_path, "seurat_", 
-          sample_name, "/Output/InferCNV/supervised_clustering/subpop/subset/"), 
-          pattern = "infercnv.14_HMM_predHMMi6.rand_trees.hmm_mode-subclusters.repr_intensities.observations.txt", 
-          full.names = T)
-        } else {
-          infercnv_output_filename <- list.files(paste0(seurat_path, "seurat_", 
-          sample_name, "/Output/InferCNV/supervised_clustering/subpop/"), 
-          pattern = "infercnv.14_HMM_predHMMi6.rand_trees.hmm_mode-subclusters.repr_intensities.observations.txt", 
-          full.names = T)
-        }
-      } else if (run_mode == "sample") {
-        if (subset_data) {
-          infercnv_output_filename <- list.files(paste0(seurat_path, "seurat_", 
-          sample_name, "/Output/InferCNV/supervised_clustering/sample/subset/"), 
-          pattern = "infercnv.14_HMM_predHMMi6.rand_trees.hmm_mode-subclusters.repr_intensities.observations.txt", full.names = T)
-        } else {
-          infercnv_output_filename <- list.files(paste0(seurat_path, "seurat_", 
-          sample_name, "/Output/InferCNV/supervised_clustering/sample/"), 
-          pattern = "infercnv.14_HMM_predHMMi6.rand_trees.hmm_mode-subclusters.repr_intensities.observations.txt", full.names = T)
-        }
-      }
-    } else {
-      if (subset_data) {
-        infercnv_output_filename <- list.files(paste0(seurat_path, "seurat_", 
-        sample_name, "/Output/InferCNV/supervised_clustering/subpop/subset/"), 
-        pattern = "infercnv.1[2,5]_denoised.observations.txt", 
-        full.names = T)
-      } else {
-        infercnv_output_filename <- list.files(paste0(seurat_path, "seurat_", 
-        sample_name, "/Output/InferCNV/supervised_clustering/subpop/"), 
-        pattern = "infercnv.1[2,5]_denoised.observations.txt", 
-        full.names = T)
-      }
-    }
+    integrated_epi_ids <- read.table(paste0(input_dir, "integrated_object_epithelial_cell_ids.txt"),
+      header=F, sep="\n", as.is=T)[,1]
   }
   
-  infercnv_output <- as.data.frame(t(read.table(infercnv_output_filename)))
-  heatmap_df <- infercnv_output[!(rownames(infercnv_output) %in% cells_to_remove),]
+  missing_epis <- integrated_epi_ids[!(integrated_epi_ids %in% individual_epi_ids)]
+  print(paste0("Total no. epithelial cells in integrated data but not individual = ",
+    length(missing_epis)))
+  
+  # if no epithelial or CAF clusters present, abort:
+  if (length(epithelial_clusters) < 1) {
+    print(paste0("No epithelial/myoepithelial clusters detected, aborting..."))
+  } else {
+    # write metadata files and new seurat object:
+    if (!file.exists(paste0(input_dir, "metadata.txt"))) {
+      write.table(infercnv_metadata$metadata, paste0(input_dir, "metadata.txt"), 
+        quote=F, sep="\t", col.names=F, row.names=F)
+      write.table(infercnv_metadata$number_per_group, paste0(input_dir, 
+        "number_per_group.txt"), quote=F, col.names=F, row.names=F, sep="\t")
+      saveRDS(seurat_10X, paste0(sample_dir, "Rdata/04_seurat_object_annotated.RData"))
+    }
+    
+    # define normals which will act as InferCNV reference cells:
+    normals <- grep(
+    	"[e,E]pithelial|[m,M]yoepithelial|CAF|[u,U]nassigned|[u,U]nknown|[t,T]umour|[t,T]umor", 
+      unique(infercnv_metadata$metadata$cell_type[
+        infercnv_metadata$metadata$cell_ids %in% colnames(count_df)
+      ]), value=T, 
+      invert=T
+    )
+    
+    print(paste0("Normal is: ", normals))
+  
+    print("Creating inferCNV object...")
+    raw_path <- paste0(input_dir, "input_matrix.txt")
+    annotation_path <- paste0(input_dir, "metadata.txt")
+    gene_path <- paste0(ref_dir, "infercnv_gene_order.txt")
+    initial_infercnv_object <- create_infercnv_object(raw_path, annotation_path,
+      gene_path, normals)
+    
+    print("InferCNV object created, running inferCNV...")
+    system.time(
+    infercnv_output <- run_infercnv(initial_infercnv_object, numcores-1, out_dir, 
+      0.1, 101, 3, 1.3)
+    )
+  }
+} else {
+  print("InferCNV output already exists!")
+}
+
+  
+################################################################################
+### 4. Create heatmap and annotations ###
+################################################################################
+  
+if (file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt"))) {
+  # load InferCNV output:
+  print("Loading InferCNV output files...")
+  infercnv_output <- as.data.frame(t(read.table(paste0(out_dir, 
+  	"infercnv.12_denoised.observations.txt"))))
+  # load metadata:
+  if (!exists(infercnv_metadata)) {
+  	metadata_df <- read.table(paste0(input_dir, "metadata.txt"), header=T,
+  	  sep="\t", as.is=T)
+  } else {
+  	metadata_df <- infercnv_metadata$metadata
+  }
+
+  # determine the epithelial cells:
+  epithelial_ids <- metadata_df$cell_ids[grep("pithelial", metadata_df$cell_type)]
+
+  heatmap_df <- infercnv_output[rownames(infercnv_output) %in% epithelial_ids,]
   print(dim(heatmap_df))
+
+  
   
   # check all epithelial cells are present:
   integrated_object <- readRDS(
@@ -1046,6 +994,8 @@ if (length(epithelial_clusters) < 1) {
   system(paste0("for p in ", plot_dir, "*.pdf; do echo $p; f=$(basename $p); echo $f; ",
   "new=$(echo $f | sed 's/.pdf/.png/'); echo $new; ", 
   "convert -density 150 ", plot_dir, "$f -quality 90 ", plot_dir, "$new; done"))
+
+}
 
 }
 
