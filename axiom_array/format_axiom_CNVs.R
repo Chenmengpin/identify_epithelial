@@ -24,6 +24,8 @@ brca_gr <- GRanges(
   symbol = NA
 )
 
+#brca_gr_sub <- brca_gr[c(1,2,66,666,6666, 66666, 666666)]
+
 gene_coords <- read.table(
   paste0(ref_dir, "infercnv_gene_order.txt"), header=F, sep="\t"
 )
@@ -34,9 +36,18 @@ gene_gr <- GRanges(
   symbol = gene_coords$V1
 )
 
+print(paste0("Original number of array probes = ", length(brca_gr)))
+
+# find overlaps between 2 genomic ranges to find which probes correspond to which genes:
 olaps <- findOverlaps(brca_gr, gene_gr)
+# remove all genes except for first hit for all probes:
 olaps <- olaps[!duplicated(queryHits(olaps)),]
+# add corresponding gene symbols to each probe entry in brca_gr:
+brca_gr$symbol[queryHits(olaps)] <- as.character(gene_gr$symbol[subjectHits(olaps)])
+# remove all probes which do not correspond to gene symbol:
+brca_gr <- brca_gr[!is.na(brca_gr$symbol)]
 
-brca_gr$symbol[queryHits(olaps)] <- gene_gr$symbol[subjectHits(olaps)]
+print(paste0("Final number of array probes with gene information = ", length(brca_gr)))
 
+### 349003 probes not assigned to any gene symbols! ###
 
