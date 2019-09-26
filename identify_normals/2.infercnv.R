@@ -8,7 +8,7 @@ numcores=as.numeric(args[4])
 draw_bulk_annotations <- as.logical(args[5])
 
 #subproject_name <- "identify_normals"
-#sample_name <- "CID4461"
+#sample_name <- "CID4513"
 #subset_data <- FALSE
 #numcores=6
 #draw_bulk_annotations <- FALSE
@@ -75,11 +75,8 @@ run_infercnv <- dget(paste0(func_dir, "run_infercnv.R"))
 create_group_annotation <- dget(paste0(func_dir, "create_group_annotation.R"))
 fetch_chromosome_boundaries <- dget(paste0(func_dir, "fetch_chromosome_boundaries.R"))
 gg_color_hue <- dget(paste0(func_dir, "gg_color_hue.R"))
-annotate_PAM50_CNV <- dget(paste0(func_dir, "annotate_PAM50_CNV.R"))
-create_CNV_genes_annotation <- dget(paste0(func_dir, "create_CNV_genes_annotation.R"))
-create_GIN_annotation <- dget(paste0(func_dir, "create_GIN_annotation.R"))
-create_normal_call_annotation <- dget(paste0(func_dir, "create_normal_call_annotation.R"))
 create_QC_annotation <- dget(paste0(func_dir, "create_QC_annotation.R"))
+create_array_CNV_annotation <- dget(paste0(func_dir, "create_array_CNV_annotation.R"))
 
 
 ################################################################################
@@ -93,10 +90,12 @@ if (subset_data) {
   system(paste0("mkdir -p ", input_dir))
 }
 
-if (!file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt") {
+if (!file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt")) & 
+	!file.exists(paste0(out_dir, "infercnv.15_denoised.observations.txt"))) {
 
   # load seurat object:
   seurat_10X <- readRDS(paste0(sample_dir, "Rdata/03_seurat_object_processed.RData"))
+  Idents(seurat_10X) <- seurat_10X@meta.data$PC_A_res.1
   
   # create raw matrix input file and subset if necessary:
   count_df <- as.matrix(GetAssayData(seurat_10X , slot = "counts"))
@@ -104,7 +103,8 @@ if (!file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt") {
     count_df <- count_df[1:500, 1:500]
   }
   
-  # prepare infercnv metadata with annotated cell types and update seurat object:
+  ###### prepare infercnv metadata with annotated cell types and update seurat object
+  # adjust to include metaplastic epithelial cells ###
   print("Creating inferCNV metadata file...")
   infercnv_metadata <- prepare_infercnv_metadata(seurat_10X, subset_data=subset_data, 
     count_df)
@@ -204,6 +204,20 @@ if (!file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt") {
   }
 } else {
   print("InferCNV output already exists!")
+
+  if (!file.exists(paste0(input_dir, "integrated_object_epithelial_cell_ids.txt"))) {
+    integrated_object <- readRDS(paste0(integrated_dir, 
+      "/01_seurat_subset_Epithelial.Rdata"))
+    integrated_epi_ids <- names(Idents(integrated_object))[grep(sample_name, 
+      names(Idents(integrated_object)))]
+    write.table(integrated_epi_ids, paste0(input_dir, 
+      "integrated_object_epithelial_cell_ids.txt"), quote=F, sep="\n", col.names=F,
+      row.names=F)
+  } else {
+    integrated_epi_ids <- read.table(paste0(input_dir, "integrated_object_epithelial_cell_ids.txt"),
+      header=F, sep="\n", as.is=T)[,1]
+  }
+  ######
 }
 
   
@@ -211,335 +225,226 @@ if (!file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt") {
 ### 4. Create heatmap and annotations ###
 ################################################################################
   
-if (file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt"))) {
+if (file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt")) | 
+  file.exists(paste0(out_dir, "infercnv.15_denoised.observations.txt"))) {
   # load InferCNV output:
   print("Loading InferCNV output files...")
-  infercnv_output <- as.data.frame(t(read.table(paste0(out_dir, 
-  	"infercnv.12_denoised.observations.txt"))))
+  if (file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt"))) {
+    infercnv_output <- as.data.frame(t(read.table(paste0(out_dir, 
+  	  "infercnv.12_denoised.observations.txt"))))
+  } else if (file.exists(paste0(out_dir, "infercnv.15_denoised.observations.txt"))) {
+  	infercnv_output <- as.data.frame(t(read.table(paste0(out_dir, 
+  	  "infercnv.15_denoised.observations.txt"))))
+  }
+
   # load metadata:
-  if (!exists(infercnv_metadata)) {
-  	metadata_df <- read.table(paste0(input_dir, "metadata.txt"), header=T,
+  if (!exists("infercnv_metadata")) {
+  	metadata_df <- read.table(paste0(input_dir, "metadata.txt"), header=F,
   	  sep="\t", as.is=T)
+  	colnames(metadata_df) <- c("cell_ids", "cell_type")
   } else {
   	metadata_df <- infercnv_metadata$metadata
   }
 
-  # determine the epithelial cells:
-  epithelial_ids <- metadata_df$cell_ids[grep("pithelial", metadata_df$cell_type)]
+  #### load seurat object - isolate nUMI and nGene information from this so
+  # it doesn't need loading each time ###
+  seurat_10X <- readRDS(paste0(sample_dir, "Rdata/03_seurat_object_processed.RData"))
 
+  # determine the epithelial cells and only include these in heatmap:
+  epithelial_ids <- metadata_df$cell_ids[grep("pithelial", metadata_df$cell_type)]
   heatmap_df <- infercnv_output[rownames(infercnv_output) %in% epithelial_ids,]
   print(dim(heatmap_df))
 
-  
-  
   # check all epithelial cells are present:
-  integrated_object <- readRDS(
-    "/share/ScratchGeneral/sunwu/projects/MINI_ATLAS_PROJECT/Jun2019/02_integration/output/CCA_CCA23Jun2019/Output/Rdata/03_seurat_CCA_aligned_processed.Rdata"
-  )
-  integrated_epi <- names(Idents(integrated_object))[
-    grep("pithelial", integrated_object$garnett_call_ext_major)
-  ]
-  print(paste0("Are all epithelial cells present? ", 
-    length(grep(sample_name, integrated_epi, value=T)) == nrow(heatmap_df)))
-  
-  
-  # remove 'luminal' from epithelial cells as Garnett labels everything luminal:
-  #infercnv_metadata$metadata$cell_type <- gsub("Luminal_", "", infercnv_metadata$metadata$cell_type)
+  if (!exists("integrated_epi_ids")) {
+  	integrated_epi_ids <- read.table(paste0(input_dir, "integrated_object_epithelial_cell_ids.txt"),
+      header=F, sep="\n", as.is=T)[,1]
+  }
+  missing_epis <- integrated_epi_ids[!(integrated_epi_ids %in% epithelial_ids)]
+  print(paste0("Total no. epithelial cells in integrated data but not in InferCNV output = ",
+    length(missing_epis)))
+
   # create group annotation df
-  group_annotation <- create_group_annotation(heatmap_df, infercnv_metadata$metadata)
-  # ensure heatmap_df has same cell order as group_annotation$group_annotation_df:
-  m <- match(rownames(group_annotation$group_annotation_df), rownames(heatmap_df))
-  heatmap_df <- heatmap_df[m,]
+  group_annotation <- create_group_annotation(heatmap_df, metadata_df)
+  saveRDS(group_annotation, paste0(Robject_dir, "group_annotation.RData"))
+  
+  # fetch chromosome boundary co-ordinates:
   chr_data <- fetch_chromosome_boundaries(heatmap_df, ref_dir)
+  saveRDS(chr_data, paste0(Robject_dir, "chromosome_data.RData"))
   
-  if (HMM) {
-    # determine normal cell ids:
-    normal_cells <- infercnv_metadata$metadata$cell_ids[
-      infercnv_metadata$metadata$cell_type %in% normals
-    ]
-  	# add GIN annotation:
-    GIN_annotation <- create_GIN_annotation(heatmap_df, normal_cells)
-    # add normal annotation:
-    normal_call_annotation <- create_normal_call_annotation(heatmap_df, 
-      infercnv_metadata$metadata, GIN_annotation$GIN_levels, 0.3, 0.2)
+  # create nUMI and nGene annotations:
+  QC_annotation <- create_QC_annotation(seurat_10X, heatmap_df)
+  saveRDS(QC_annotation, paste0(Robject_dir, "QC_annotation.RData"))
+
+  # create array CNV annotation:
+  all_array_CNVs <- read.table(paste0(ref_dir, "all_array_CNVs.txt"))
+  array_CNV_annotation <- create_array_CNV_annotation(heatmap_df, all_array_CNVs)
+  saveRDS(array_CNV_annotation, paste0(Robject_dir, "array_CNV_annotation.RData"))
+  grid_array_heatmap <- grid.grabExpr(draw(array_CNV_annotation$array_CNV_heatmap, 
+    heatmap_legend_side = "left"))
+
+  ###### create array PDX CNV annotation - inbuild this into function ######
+  pdx_name <- gsub("CID", "PDX", sample_name)
+  PDX_CNVs <- all_array_CNVs[,colnames(all_array_CNVs) %in% pdx_name]
+  names(PDX_CNVs) <- rownames(all_array_CNVs)
+
+  PDX_CNVs[PDX_CNVs > 6] <- 6
+  PDX_CNVs <- PDX_CNVs/2
+  PDX_CNVs <- PDX_CNVs[colnames(heatmap_df)]
+  PDX_CNVs[is.na(PDX_CNVs)] <- 2
+  names(PDX_CNVs) <- colnames(heatmap_df)
+  PDX_CNVs <- as.data.frame(PDX_CNVs)
+  PDX_CNVs <- as.data.frame(t(PDX_CNVs))
+
+  saveRDS(PDX_CNVs, paste0(Robject_dir, "PDX_CNVs.RData"))
+
+  PDX_heatmap <- Heatmap(
+  	PDX_CNVs, name=paste0("array_heatmap"),
+  	col = colorRamp2(c(min(PDX_CNVs[1,]), 1, max(PDX_CNVs[1,])), 
+      c("#00106B", "white", "#680700"), space = "sRGB"),
+  	  cluster_columns = F, cluster_rows = F, show_row_dend = FALSE,
+  	  show_row_names = F, show_column_names = F,
+  	  heatmap_legend_param = list(title = "SNP array\nPDX CNV", legend_direction = "horizontal"),
+  	  use_raster = T, raster_device = c("png")
+  )
+  grid_PDX_heatmap <- grid.grabExpr(draw(PDX_heatmap, heatmap_legend_side = "left"))
+
+  # prepare df for plotting:
+  plot_object <- heatmap_df
+  colnames(plot_object) <- rep("la", ncol(plot_object))
+
+  saveRDS(plot_object, paste0(Robject_dir, "final_heatmap_object.RData"))
   
-    if (run_mode == "subpop") {
-      # save GIN scores:
-      if (!file.exists(paste0(seurat_path, "seurat_", 
-        sample_name, 
-        "/Output/InferCNV/supervised_clustering/subpop/GIN_scores.txt"))) {
-        write.table(GIN_annotation$GIN_levels, paste0(seurat_path, "seurat_", 
-        sample_name, 
-        "/Output/InferCNV/supervised_clustering/subpop/GIN_scores.txt"), 
-        quote=F, row.names=F)
-      }
-      # save correlation scores:
-      if (!file.exists(paste0(seurat_path, "seurat_", 
-        sample_name, 
-        "/Output/InferCNV/supervised_clustering/subpop/top_5%_cancer_correlation_scores.txt"))) {
-        write.table(normal_call_annotation$correlation_df, paste0(seurat_path, "seurat_", 
-        sample_name, 
-        "/Output/InferCNV/supervised_clustering/subpop/top_5%_cancer_correlation_scores.txt"), 
-        quote=F, row.names=F)
-      }
-    } else if (run_mode == "sample") {
-      # save GIN scores:
-      if (!file.exists(paste0(seurat_path, "seurat_", 
-        sample_name, 
-        "/Output/InferCNV/supervised_clustering/sample/GIN_scores.txt"))) {
-        write.table(GIN_annotation$GIN_levels, paste0(seurat_path, "seurat_", 
-        sample_name, 
-        "/Output/InferCNV/supervised_clustering/sample/GIN_scores.txt"), 
-        quote=F, row.names=F)
-      }
-      # save correlation scores:
-      if (!file.exists(paste0(seurat_path, "seurat_", 
-        sample_name, 
-        "/Output/InferCNV/supervised_clustering/sample/top_5%_cancer_correlation_scores.txt"))) {
-        write.table(normal_call_annotation$correlation_df, paste0(seurat_path, "seurat_", 
-        sample_name, 
-        "/Output/InferCNV/supervised_clustering/sample/top_5%_cancer_correlation_scores.txt"), 
-        quote=F, row.names=F)
+  print("Generating final heatmap...")
+
+  ######
+#  group_annotation <- readRDS(paste0(Robject_dir, "group_annotation.RData"))
+#  chr_data <- readRDS(paste0(Robject_dir, "chromosome_data.RData"))
+#  QC_annotation <- readRDS(paste0(Robject_dir, "QC_annotation.RData"))
+#  array_CNVs <- readRDS(paste0(Robject_dir, "array_CNVs.RData"))
+#  plot_object <- readRDS(paste0(Robject_dir, "final_heatmap_object.RData"))
+  ######
+  
+  na_less_vector <- unlist(plot_object)
+  na_less_vector <- na_less_vector[!is.na(na_less_vector)]
+  
+  # create main CNV heatmap:
+  final_heatmap <- Heatmap(
+    plot_object, name = paste0("hm"), 
+    col = colorRamp2(c(min(na_less_vector), 1, max(na_less_vector)), 
+      c("#00106B", "white", "#680700"), space = "sRGB"),
+    cluster_columns = F, cluster_rows = F,
+    split = group_annotation$group_annotation_df$group,
+    show_row_names = F, show_column_names = T,
+    column_names_gp = gpar(col = "white"),
+    show_row_dend = FALSE,
+    heatmap_legend_param = list(title = "Modified\nexpression", color_bar = "continuous", 
+    grid_height = unit(1.5, "cm"), grid_width = unit(1.5, "cm"), legend_direction = "horizontal",
+    title_gp = gpar(fontsize = 8, fontface = "bold"), labels_gp = gpar(fontsize = 6)),
+    use_raster = T, raster_device = c("png")
+  )
+
+  # determine co-ordinates of horizontal lines at group borders:
+  spl_groups <- split(group_annotation$group_annotation_df$group, 
+  group_annotation$group_annotation_df$group)
+  spl_groups <- spl_groups[unique(group_annotation$group_annotation_df$group)]
+  if (length(spl_groups) > 1) {
+    for ( n in 1:(length(spl_groups)-1) ) {
+      if (n==1) {
+        hlines <- c(length(spl_groups[[n]])/length(group_annotation$group_annotation_df$group))
+      } else {
+        hlines[n] <- hlines[n-1] + length(spl_groups[[n]])/length(group_annotation$group_annotation_df$group)
       }
     }
-  
-    QC_annotation <- create_QC_annotation(seurat_10X, heatmap_df)
-  
-    if (draw_bulk_annotations) {
-      # create heatmap annotation for genome-wide PAM50 subtype CNV frequency
-      PAM50_subtypes <- c("LumA", "LumB", "Her2", "Basal", "Normal")
-      METABRIC_CNV_frequencies <- read.table(paste0(ref_dir, "infercnv_metabric_cnv.txt"), header=T, as.is=T, fill=T)
-      for ( i in 1:length(PAM50_subtypes) ) {
-          print(paste0("Generating ", PAM50_subtypes[i], " CNV plot..."))
-          if (i==1) {
-            metabric_plots <- 
-              list(annotate_PAM50_CNV(heatmap_df, METABRIC_CNV_frequencies, 
-              PAM50_subtypes[i], chr_data$ends, chr_data$lengths))
-          } else {
-            metabric_plots[[i]] <- 
-              annotate_PAM50_CNV(heatmap_df, METABRIC_CNV_frequencies, 
-              PAM50_subtypes[i], chr_data$ends, chr_data$lengths)
-          }
-      }
-      names(metabric_plots) <- PAM50_subtypes
-      # create heatmap annotation for gain and loss-associated genes, 
-      #collated by Niantao
-      # read in CNV_genes
-      CNV_genes <- read.table(paste0(ref_dir, 
-        "./infercnv_brca_genes_associated_with_CNVs.txt"), header = T, as.is = T)
-      # create CNV_genes annotation:
-      print("Annotating CNV-associated genes...")
-      CNV_genes_annotation <- create_CNV_genes_annotation(heatmap_df, CNV_genes)
-    }
-    
-    plot_object <- heatmap_df
-  
-    old_scores <- c(0, 0.5, 1, 1.5, 2, 3)
-    new_scores <- c(-2, -1, 0, 1, 2, 3)
-    for (s in 1:length(new_scores)) {
-      plot_object[plot_object == old_scores[s]] <- new_scores[s]
-    }
-    
-    colnames(plot_object) <- rep("la", ncol(plot_object))
-    
-    print("Generating final heatmap...")
-    
-    na_less_vector <- unlist(plot_object)
-    na_less_vector <- na_less_vector[!is.na(na_less_vector)]
-    
-    # create main CNV heatmap:
-    final_heatmap <- Heatmap(
-      plot_object, name = paste0("hm"), 
-      col = colorRamp2(c(-2, -1, 0, 1, 2, 3), 
-        c("#00106B", "#9191CC", "white", "#DDB6B6", "#AB4848", "#930707"), 
-        space = "sRGB"),
-      cluster_columns = F, cluster_rows = F,
-      split = group_annotation$group_annotation_df$group,
-      show_row_names = F, show_column_names = T,
-      column_names_gp = gpar(col = "white"),
-      show_row_dend = FALSE,
-      bottom_annotation = CNV_genes_annotation, bottom_annotation_height = unit(2, "cm"),
-      gap = unit(1, "cm"),
-      heatmap_legend_param = list(title = "Modified\nexpression", color_bar = "continuous", 
-      grid_height = unit(1.5, "cm"), grid_width = unit(1.5, "cm"), legend_direction = "horizontal",
-      title_gp = gpar(fontsize = 8, fontface = "bold"), labels_gp = gpar(fontsize = 6)),
-      use_raster = T, raster_device = c("png")
-    )
-  
-    # determine co-ordinates of horizontal lines at group borders:
-    spl_groups <- split(group_annotation$group_annotation_df$group, 
-    group_annotation$group_annotation_df$group)
-    spl_groups <- spl_groups[unique(group_annotation$group_annotation_df$group)]
-    if (length(spl_groups) > 1) {
-      for ( n in 1:(length(spl_groups)-1) ) {
-        if (n==1) {
-          hlines <- c(length(spl_groups[[n]])/length(group_annotation$group_annotation_df$group))
-        } else {
-          hlines[n] <- hlines[n-1] + length(spl_groups[[n]])/length(group_annotation$group_annotation_df$group)
-        }
-      }
-      hlines <- 1-hlines
-    } else {
-      hlines <- c(length(spl_groups[[1]])/length(group_annotation$group_annotation_df$group))
-    }
-    
-    
-    ################################################################################
-    ### 5. Generate heatmap and annotations ###
-    ################################################################################
-    ht_list <- group_annotation$group_annotation + final_heatmap + 
-    normal_call_annotation$normal_call_annotation + GIN_annotation$GIN_annotation + 
-    QC_annotation$nUMI_annotation + QC_annotation$nGene_annotation
-  
-    annotated_heatmap <- grid.grabExpr(
-      draw(ht_list, gap = unit(3, "mm"), heatmap_legend_side = "left")
-    )
-    
-    # determine where starting co-ordinates for heatmap are based upon longest cluster name
-    # (0.00604 units per character):
-    longest_cluster_name <- max(nchar(unique(as.character(group_annotation$group_annotation_df$group))))
-    x_coord <- longest_cluster_name*0.0037
-    
-    if (draw_bulk_annotations) {
-      pdf(paste0(plot_dir, "final_infercnv_predictions_heatmap_all_annotated.pdf"), 
-      height = 14.5, width = 18)
-        grid.newpage()
-        # plot Normal subtype:
-        pushViewport(viewport(x = x_coord+0.003, y = 0.090,
-                              width = 0.845+0.019, height = 0.08, just = c("left", "top")))
-        grid.draw(metabric_plots[[5]])
-        popViewport()
-        
-        # plot Basal subtype:
-        pushViewport(viewport(x = x_coord+0.008, y = 0.169,
-                              width = 0.845+0.014, height = 0.08, just = c("left", "top")))
-        grid.draw(metabric_plots[[4]])
-        popViewport()
-        
-        # plot Her2 subtype:
-        pushViewport(viewport(x = x_coord+0.01, y = 0.251, 
-                              width = 0.845+0.012, height = 0.08, just = c("left", "top")))
-        grid.draw(metabric_plots[[3]])
-        popViewport()
-        
-        # plot LumB subtype:
-        pushViewport(viewport(x = x_coord+0.007, y = 0.333, 
-                              width = 0.845+0.015, height = 0.08, just = c("left", "top")))
-        grid.draw(metabric_plots[[2]])
-        popViewport()
-        
-        # plot LumA subtype:
-        pushViewport(viewport(x = x_coord+0.007, y = 0.411, 
-                              width = 0.845+0.015, height = 0.08, just = c("left", "top")))
-        grid.draw(metabric_plots[[1]])
-        popViewport()
-        pushViewport(viewport(x = 0, y = 0.4, 
-                              width = 0.98, height = 0.6, just = c("left", "bottom")))
-        grid.draw(annotated_heatmap)
-        decorate_heatmap_body("hm", {
-      
-          for ( e in 1:length(chr_data$end_pos) ) {
-            grid.lines(c(chr_data$end_pos[e], chr_data$end_pos[e]), c(0, 1), gp = gpar(lwd = 1, 
-              col = "#383838"))
-            grid.text(gsub("chr", "", names(chr_data$lab_pos)[e]), chr_data$lab_pos[e], 
-              unit(0, "npc") + unit(-2.1, "mm"), gp=gpar(fontsize=8))
-          }
-          for ( m in 1:length(hlines) ) {
-            grid.lines(c(0, 1), c(hlines[m], hlines[m]), gp = gpar(lwd = 1, col = "#383838"))
-          }
-        })
-    
-        pushViewport(viewport(x=x_coord + 0.885, y=0.020, width = 0.1, height = 0.1, just = "bottom"))
-        grid.text("normal call", rot=65)
-        popViewport()
-        pushViewport(viewport(x=x_coord + 0.905, y=0.045, width = 0.1, height = 0.1, just = "bottom"))
-        #grid.draw(lollipop)
-        grid.text("GIN", rot=65)
-        popViewport()
-        pushViewport(viewport(x=x_coord + 0.92, y=0.045, width = 0.1, height = 0.1, just = "bottom"))
-        #grid.draw(lollipop)
-        grid.text("nUMI", rot=65)
-        popViewport()
-        pushViewport(viewport(x=x_coord + 0.935, y=0.045, width = 0.1, height = 0.1, just = "bottom"))
-        #grid.draw(lollipop)
-        grid.text("nGene", rot=65)
-        popViewport()
-        
-      dev.off()
-  
-    } else {
-  
-      pdf(paste0(plot_dir, "final_infercnv_predictions_heatmap_normals_annotated.pdf"), 
-      height = 14.5, width = 18)
-        grid.newpage()
-        # plot Normal subtype:
-        pushViewport(viewport(x = x_coord+0.003, y = 0.090,
-                              width = 0.845+0.019, height = 0.08, just = c("left", "top")))
-        grid.draw(metabric_plots[[5]])
-        popViewport()
-        
-        # plot Basal subtype:
-        pushViewport(viewport(x = x_coord+0.008, y = 0.169,
-                              width = 0.845+0.014, height = 0.08, just = c("left", "top")))
-        grid.draw(metabric_plots[[4]])
-        popViewport()
-        
-        # plot Her2 subtype:
-        pushViewport(viewport(x = x_coord+0.01, y = 0.251, 
-                              width = 0.845+0.012, height = 0.08, just = c("left", "top")))
-        grid.draw(metabric_plots[[3]])
-        popViewport()
-        
-        # plot LumB subtype:
-        pushViewport(viewport(x = x_coord+0.007, y = 0.333, 
-                              width = 0.845+0.015, height = 0.08, just = c("left", "top")))
-        grid.draw(metabric_plots[[2]])
-        popViewport()
-        
-        # plot LumA subtype:
-        pushViewport(viewport(x = x_coord+0.007, y = 0.411, 
-                              width = 0.845+0.015, height = 0.08, just = c("left", "top")))
-        grid.draw(metabric_plots[[1]])
-        popViewport()
-        pushViewport(viewport(x = 0, y = 0.4, 
-                              width = 0.98, height = 0.6, just = c("left", "bottom")))
-        grid.draw(annotated_heatmap)
-        decorate_heatmap_body("hm", {
-      
-          for ( e in 1:length(chr_data$end_pos) ) {
-            grid.lines(c(chr_data$end_pos[e], chr_data$end_pos[e]), c(0, 1), gp = gpar(lwd = 1, 
-              col = "#383838"))
-            grid.text(gsub("chr", "", names(chr_data$lab_pos)[e]), chr_data$lab_pos[e], 
-              unit(0, "npc") + unit(-2.1, "mm"), gp=gpar(fontsize=8))
-          }
-          for ( m in 1:length(hlines) ) {
-            grid.lines(c(0, 1), c(hlines[m], hlines[m]), gp = gpar(lwd = 1, col = "#383838"))
-          }
-        })
-    
-        pushViewport(viewport(x=x_coord + 0.885, y=0.020, width = 0.1, height = 0.1, just = "bottom"))
-        grid.text("normal call", rot=65)
-        popViewport()
-        pushViewport(viewport(x=x_coord + 0.905, y=0.045, width = 0.1, height = 0.1, just = "bottom"))
-        #grid.draw(lollipop)
-        grid.text("GIN", rot=65)
-        popViewport()
-        pushViewport(viewport(x=x_coord + 0.92, y=0.045, width = 0.1, height = 0.1, just = "bottom"))
-        #grid.draw(lollipop)
-        grid.text("nUMI", rot=65)
-        popViewport()
-        pushViewport(viewport(x=x_coord + 0.935, y=0.045, width = 0.1, height = 0.1, just = "bottom"))
-        #grid.draw(lollipop)
-        grid.text("nGene", rot=65)
-        popViewport()
-        
-      dev.off()
-    }
-    
-    print(paste0("Group heatmap created, output in ", plot_dir))
-  
+    hlines <- 1-hlines
   } else {
+    hlines <- c(length(spl_groups[[1]])/length(group_annotation$group_annotation_df$group))
+  }
+  
+  
+  ################################################################################
+  ### 5. Generate heatmap and annotations ###
+  ################################################################################
+  
+  # determine where starting co-ordinates for heatmap are based upon longest cluster name
+  # (0.00604 units per character):
+  longest_cluster_name <- max(nchar(unique(as.character(group_annotation$group_annotation_df$group))))
+  x_coord <- longest_cluster_name*0.0037
+
+  ht_list <- group_annotation$group_annotation + final_heatmap + 
+  QC_annotation$nUMI_annotation + QC_annotation$nGene_annotation
+  
+  annotated_heatmap <- grid.grabExpr(
+    draw(ht_list, gap = unit(3, "mm"), heatmap_legend_side = "left")
+  )
+  
+  # determine where starting co-ordinates for heatmap are based upon longest cluster name
+  # (0.00604 units per character):
+  longest_cluster_name <- max(nchar(unique(as.character(group_annotation$group_annotation_df$group))))
+  x_coord <- longest_cluster_name*0.0037
+
+  ###### add if PDX exists for PDX plots! ######
+  ###### find out how to vertically plot complex heatmaps - may need to update package? ######
+  pdf(paste0(plot_dir, "infercnv_heatmap_with_array_and_PDX_CNV_annotation.pdf"), height = 14.5, width = 18)   
+  	grid.newpage()
+  	  pushViewport(viewport(x = 0, y = 0.15, 
+                          width = 0.99, height = 0.8, just = c("left", "bottom")))
+        grid.draw(annotated_heatmap)
+        decorate_heatmap_body("hm", {
+          for ( e in 1:length(chr_data$end_pos) ) {
+          grid.lines(c(chr_data$end_pos[e], chr_data$end_pos[e]), c(0, 1), gp = gpar(lwd = 1, 
+            col = "#383838"))
+          grid.text(gsub("chr", "", names(chr_data$lab_pos)[e]), chr_data$lab_pos[e], 
+            unit(0, "npc") + unit(-2.1, "mm"), gp=gpar(fontsize=8))
+        }
+        for ( m in 1:length(hlines) ) {
+          grid.lines(c(0, 1), c(hlines[m], hlines[m]), gp = gpar(lwd = 1, col = "#383838"))
+        }
+      })
+      popViewport()
+      pushViewport(viewport(x=x_coord + 0.917, y=0.1, width = 0.1, height = 0.1, just = "bottom"))
+        grid.text("nUMI", rot=65)
+      popViewport()
+
+      pushViewport(viewport(x=x_coord + 0.935, y=0.1, width = 0.1, height = 0.1, just = "bottom"))
+        grid.text("nGene", rot=65)
+      popViewport()
+
+      pushViewport(viewport(x = 0.0245, y = 0.097, 
+      	width = 0.93, height = 0.05, just = c("left", "bottom")))
+        grid.draw(grid_array_heatmap)
+      popViewport()
+
+      pushViewport(viewport(x = 0.0245, y = 0.047, 
+      	width = 0.93, height = 0.05, just = c("left", "bottom")))
+        grid.draw(grid_PDX_heatmap)
+      popViewport()
+      
+  dev.off()
+}
+print(paste0("Group heatmap created, output in ", plot_dir))
+
+
+
+
+
+
+
+
+  ### why is the range different than previously for the following vectors? ###
+  
+  # calculate CNA values as the mean of the scaled squares of all CNV values across the genome for each cell:
+  CNA_values <- apply(heatmap_df, 1, function(y) {
+    y[is.na(y)] <- 0
+    #return(round(sum(abs(y))/ncol(x), 6))
+    #return(mean(y^2))
+    scaled_y <- rescale(y, c(-1, 1))
+    return(mean(scaled_y^2))
+  })
     
+
+
+
     infercnv_measures <- readRDS(paste0(seurat_path, "infercnv_measures_mean_of_scaled_squares.RData"))
     infercnv_measures <- round(eval(parse(text=paste0("infercnv_measures$", sample_name))), 6)
   
@@ -791,36 +696,11 @@ if (file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt"))) {
         show_row_names = F, show_column_names = F, 
         heatmap_legend_param = list(title = "Normal epithelial calls", title_gp = gpar(fontsize = 8, 
         fontface = "bold"), labels_gp = gpar(fontsize = 6)))
-  
+  		
+  	  # create nUMI and nGene annotations:
       QC_annotation <- create_QC_annotation(seurat_10X, heatmap_df)
-    
-      if (draw_bulk_annotations) {
-        # create heatmap annotation for genome-wide PAM50 subtype CNV frequency
-        PAM50_subtypes <- c("LumA", "LumB", "Her2", "Basal", "Normal")
-        METABRIC_CNV_frequencies <- read.table(paste0(ref_dir, "infercnv_metabric_cnv.txt"), header=T, as.is=T, fill=T)
-        for ( i in 1:length(PAM50_subtypes) ) {
-            print(paste0("Generating ", PAM50_subtypes[i], " CNV plot..."))
-            if (i==1) {
-              metabric_plots <- 
-                list(annotate_PAM50_CNV(heatmap_df, METABRIC_CNV_frequencies, 
-                PAM50_subtypes[i], chr_data$ends, chr_data$lengths))
-            } else {
-              metabric_plots[[i]] <- 
-                annotate_PAM50_CNV(heatmap_df, METABRIC_CNV_frequencies, 
-                PAM50_subtypes[i], chr_data$ends, chr_data$lengths)
-            }
-        }
-        names(metabric_plots) <- PAM50_subtypes
-        # create heatmap annotation for gain and loss-associated genes, 
-        #collated by Niantao
-        # read in CNV_genes
-        CNV_genes <- read.table(paste0(ref_dir, 
-          "./infercnv_brca_genes_associated_with_CNVs.txt"), header = T, as.is = T)
-        # create CNV_genes annotation:
-        print("Annotating CNV-associated genes...")
-        CNV_genes_annotation <- create_CNV_genes_annotation(heatmap_df, CNV_genes)
-      }
-      
+
+      # prepare df for heatmap:
       plot_object <- heatmap_df
       colnames(plot_object) <- rep("la", ncol(plot_object))
       
@@ -881,6 +761,98 @@ if (file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt"))) {
       # (0.00604 units per character):
       longest_cluster_name <- max(nchar(unique(as.character(group_annotation$group_annotation_df$group))))
       x_coord <- longest_cluster_name*0.0037
+
+
+
+    
+      if (draw_bulk_annotations) {
+        # create heatmap annotation for genome-wide PAM50 subtype CNV frequency
+        PAM50_subtypes <- c("LumA", "LumB", "Her2", "Basal", "Normal")
+        METABRIC_CNV_frequencies <- read.table(paste0(ref_dir, "infercnv_metabric_cnv.txt"), header=T, as.is=T, fill=T)
+        for ( i in 1:length(PAM50_subtypes) ) {
+            print(paste0("Generating ", PAM50_subtypes[i], " CNV plot..."))
+            if (i==1) {
+              metabric_plots <- 
+                list(annotate_PAM50_CNV(heatmap_df, METABRIC_CNV_frequencies, 
+                PAM50_subtypes[i], chr_data$ends, chr_data$lengths))
+            } else {
+              metabric_plots[[i]] <- 
+                annotate_PAM50_CNV(heatmap_df, METABRIC_CNV_frequencies, 
+                PAM50_subtypes[i], chr_data$ends, chr_data$lengths)
+            }
+        }
+        names(metabric_plots) <- PAM50_subtypes
+        # create heatmap annotation for gain and loss-associated genes, 
+        #collated by Niantao
+        # read in CNV_genes
+        CNV_genes <- read.table(paste0(ref_dir, 
+          "./infercnv_brca_genes_associated_with_CNVs.txt"), header = T, as.is = T)
+        # create CNV_genes annotation:
+        print("Annotating CNV-associated genes...")
+        CNV_genes_annotation <- create_CNV_genes_annotation(heatmap_df, CNV_genes)
+      }
+
+      plot_object <- heatmap_df
+      colnames(plot_object) <- rep("la", ncol(plot_object))
+      
+      print("Generating final heatmap...")
+      
+      na_less_vector <- unlist(plot_object)
+      na_less_vector <- na_less_vector[!is.na(na_less_vector)]
+      
+      # create main CNV heatmap:
+      final_heatmap <- Heatmap(
+        plot_object, name = paste0("hm"), 
+        col = colorRamp2(c(min(na_less_vector), 1, max(na_less_vector)), 
+          c("#00106B", "white", "#680700"), space = "sRGB"),
+        cluster_columns = F, cluster_rows = F,
+        split = group_annotation$group_annotation_df$group,
+        show_row_names = F, show_column_names = T,
+        column_names_gp = gpar(col = "white"),
+        show_row_dend = FALSE,
+        #bottom_annotation = CNV_genes_annotation, bottom_annotation_height = unit(2, "cm"),
+        #gap = unit(1, "cm"),
+        heatmap_legend_param = list(title = "Modified\nexpression", color_bar = "continuous", 
+        grid_height = unit(1.5, "cm"), grid_width = unit(1.5, "cm"), legend_direction = "horizontal",
+        title_gp = gpar(fontsize = 8, fontface = "bold"), labels_gp = gpar(fontsize = 6)),
+        use_raster = T, raster_device = c("png")
+      )
+    
+      # determine co-ordinates of horizontal lines at group borders:
+      spl_groups <- split(group_annotation$group_annotation_df$group, 
+      group_annotation$group_annotation_df$group)
+      spl_groups <- spl_groups[unique(group_annotation$group_annotation_df$group)]
+      if (length(spl_groups) > 1) {
+        for ( n in 1:(length(spl_groups)-1) ) {
+          if (n==1) {
+            hlines <- c(length(spl_groups[[n]])/length(group_annotation$group_annotation_df$group))
+          } else {
+            hlines[n] <- hlines[n-1] + length(spl_groups[[n]])/length(group_annotation$group_annotation_df$group)
+          }
+        }
+        hlines <- 1-hlines
+      } else {
+        hlines <- c(length(spl_groups[[1]])/length(group_annotation$group_annotation_df$group))
+      }
+      
+      
+      ################################################################################
+      ### 5. Generate heatmap and annotations ###
+      ################################################################################
+      
+      ht_list <- group_annotation$group_annotation + final_heatmap + 
+      normal_call_annotation + infercnv_level_annotation + QC_annotation$nUMI_annotation + 
+      QC_annotation$nGene_annotation
+      
+      annotated_heatmap <- grid.grabExpr(
+        draw(ht_list, gap = unit(3, "mm"), heatmap_legend_side = "left")
+      )
+      
+      # determine where starting co-ordinates for heatmap are based upon longest cluster name
+      # (0.00604 units per character):
+      longest_cluster_name <- max(nchar(unique(as.character(group_annotation$group_annotation_df$group))))
+      x_coord <- longest_cluster_name*0.0037
+      
       
       if (draw_bulk_annotations) {
         pdf(paste0(plot_dir, "final_infercnv_heatmap_all_annotated_", scuts[l], "_silhouette_cutoff.pdf"), 

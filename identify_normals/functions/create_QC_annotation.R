@@ -1,16 +1,19 @@
-create_QC_annotation <- function(seurat_object, df) {
+create_QC_annotation <- function(qc_df, df) {
   
-  # create QC metrics df:
-  seurat_10X <- seurat_object
-  qc_df <- data.frame(
-	seurat_10X@meta.data$nCount_RNA,
-	seurat_10X@meta.data$nFeature_RNA,
-	row.names = as.character(names(Idents(seurat_10X)))
-  )
-  colnames(qc_df) <-  c("nUMI", "nGene")
-
+  # add zero QC values for SNP array CNVs
+  array_rownames <- rownames(df)[grep("array", rownames(df))]
+  if (length(array_rownames) > 0) {
+    array_qc <- data.frame(
+      row.names = array_rownames, 
+      nUMI = rep(0, length(array_rownames)),
+      nGene = rep(0, length(array_rownames))
+    )
+    qc_df <- rbind(array_qc, qc_df)
+  }
+  
+  # order the two dfs:
   m <- match(
-    rownames(heatmap_df), rownames(qc_df)
+    rownames(df), rownames(qc_df)
   )
   qc_df <- qc_df[m,]
 
