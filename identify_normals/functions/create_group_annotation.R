@@ -12,9 +12,13 @@ create_group_annotation <- function(df, metadata) {
   group_annotation_df$group <- as.character(group_annotation_df$group)
 
   # define group heatmap colours:
+  extra_colours <- c(brewer.pal(12, "Set3"), brewer.pal(12, "Paired"))
   col_palette <- c(brewer.pal(8, "Dark2"), brewer.pal(12, "Set3"), brewer.pal(8, "Accent"),
-    "#660200", "#918940", "black")
-  col_palette <- c(col_palette, col_palette)
+    "#660200", "#918940", "black", "#9ECAE1", "#3F007D", "#67000D", "#FDD0A2", "#08519C",
+    "#DBB335", "#5AA050", "#807DBA", "#1A6000", "#F16913", "#FD8D3C", "#DEEBF7", 
+    "#7F2704", "#DADAEB", "#FC9272", "#BCBDDC", extra_colours, "#b2182b", "#85929E", 
+    "#9B59B6", "#74add1","#1b7837", "#b8e186", "#fed976","#e7298a", "#18ffff", "#ef6c00",
+    "#A93226", "black","orange", "#b8bc53", "#5628ce", "#fa909c", "#8ff331","#270e26")
   cluster_number <- length(unique(group_annotation_df$group))
   cluster_cols <- col_palette[1:cluster_number]
   names(cluster_cols) <- unique(group_annotation_df$group)
@@ -29,7 +33,7 @@ create_group_annotation <- function(df, metadata) {
     labels_gp = gpar(fontsize = 8)))
 
   result_list <- list(group_annotation_df, group_annotation)
-  names(result_list) <- c("group_annotation_df", "group_annotation")
+  names(result_list) <- c("df", "annotation")
 
   return(result_list)
 }

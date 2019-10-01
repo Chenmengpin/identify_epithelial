@@ -7,7 +7,7 @@ subset_data <- as.logical(args[3])
 draw_bulk_annotations <- as.logical(args[4])
 
 #subproject_name <- "identify_normals"
-#sample_name <- "CID4463"
+#sample_name <- "CID4535"
 #subset_data <- FALSE
 #draw_bulk_annotations <- FALSE
 
@@ -40,8 +40,11 @@ library(ggplot2)
 library(dplyr)
 
 project_name <- "identify_epithelial"
-# home_dir <- "/share/ScratchGeneral/jamtor/"
-home_dir <- "/Users/jamestorpy/clusterHome/"
+if (Rstudio) {
+  home_dir <- "/Users/jamestorpy/clusterHome/"
+} else {
+  home_dir <- "/share/ScratchGeneral/jamtor/"
+}
 project_dir <- paste0(home_dir, "projects/single_cell/", project_name, "/")
 ref_dir <- paste0(project_dir, "/refs/")
 func_dir <- paste0(project_dir, "/scripts/", subproject_name, "/functions/")
@@ -145,7 +148,7 @@ if (file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt")) |
     metadata_df <- metadata_df[metadata_df$cell_ids %in% to_keep,]
 
     # scale heatmap df to values between -1 and 1:
-    scaled_heatmap_df <- as.data.frame(rescale(as.matrix(heatmap_df), c(-1, 1)))
+    heatmap_df <- as.data.frame(rescale(as.matrix(heatmap_df), c(-1, 1)))
   
     
     ################################################################################
@@ -154,7 +157,7 @@ if (file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt")) |
    
     # load SNP array CNV values if they exist:
     all_array_CNVs <- read.table(paste0(ref_dir, "all_array_CNVs.txt"))
-    if (which(colnames(all_array_CNVs) %in% sample_name) > 0) {
+    if (any(colnames(all_array_CNVs) %in% sample_name)) {
       print("Adding SNP array CNVs to heatmap df...")
       array_CNVs <- all_array_CNVs[,colnames(all_array_CNVs) %in% sample_name]
       names(array_CNVs) <- rownames(all_array_CNVs)
@@ -192,7 +195,7 @@ if (file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt")) |
       no_array_rows <- round(nrow(heatmap_df)/10, 0)
       array_CNV_df <- as.data.frame(t(data.frame(log2_array_CNVs)))
       array_CNV_df <- array_CNV_df[rep(1, no_array_rows),]
-      heatmap_df <- rbind(array_CNV_df, scaled_heatmap_df)
+      heatmap_df <- rbind(array_CNV_df, heatmap_df)
     
       array_metadata <- data.frame(cell_ids = rownames(array_CNV_df), 
       	cell_type = "SNP_array")
@@ -212,11 +215,11 @@ if (file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt")) |
 
 
   ################################################################################
-  ### 2. Create heatmap annotations ###
+  ### 3. Create heatmap and annotations ###
   ################################################################################
 
   # create group annotation df:
-  if (!file.exists(paste0(Robject_dir, "group_annotation.RData"))) {
+  if (!file.exists(paste0(Robject_dir, "combined_group_annotation.RData"))) {
   	group_annotation <- create_group_annotation(heatmap_df, metadata_df)
   	saveRDS(group_annotation, paste0(Robject_dir, "combined_group_annotation.RData"))
   } else {
@@ -246,6 +249,19 @@ if (file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt")) |
   	QC_annotation <- readRDS(paste0(Robject_dir, "combined_QC_annotation.RData"))
   }
 
+  # generate histograms of final array and inferCNV vale distributions:
+  final_infercnv <- unlist(heatmap_df[grep("array", rownames(heatmap_df), invert=T),])
+  pdf(paste0(plot_dir, "final_invercnv_histogram"))
+    hist(final_infercnv)
+  dev.off()
+
+  if (length(grep("array", rownames(heatmap_df))) > 0) {
+    final_array <- unlist(heatmap_df[grep("array", rownames(heatmap_df)),])
+    pdf(paste0(plot_dir, "final_array_histogram"))
+      print(hist(final_array))
+    dev.off()
+  }
+  
   # prepare df for plotting:
   plot_object <- heatmap_df
   colnames(plot_object) <- rep("la", ncol(plot_object))
@@ -289,7 +305,7 @@ if (file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt")) |
   
   
   ################################################################################
-  ### 5. Generate heatmap and annotations ###
+  ### 5. Plot heatmap and annotations ###
   ################################################################################
   
   ht_list <- group_annotation$group_annotation + final_heatmap + 
@@ -307,7 +323,9 @@ if (file.exists(paste0(out_dir, "infercnv.12_denoised.observations.txt")) |
   # save final heatmap objects with measurements needed to create it:
   annotated_heatmap_and_measurements <- list(
   	annotated_heatmap = annotated_heatmap,
-  	plot_object = plot_object,
+  	heatmap_df = heatmap_df,
+    group_annotation = group_annotation$group_annotation_df,
+    QC_annotation = QC_annotation$qc_df,
   	chr_data = chr_data, 
   	hlines = hlines, 
   	x_coord = x_coord
